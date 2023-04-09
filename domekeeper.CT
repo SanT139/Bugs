@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="42">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>92292</ID>
+      <Description>"启动 v41.1"</Description>
+      <Options moHideChildren="1" moDeactivateChildrenAsWell="1"/>
+      <Color>0000FF</Color>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{ Game   : domekeeper.exe
+  Version: 
+  Date   : 2022-06-07
+  Author : cfe
+
+  This script does blah blah blah
+}
+
+[ENABLE]
+
+aobscanmodule(aobGetScene,$process,48 8B 10 F2 44 0F 59 C7) // should be unique
+alloc(newmem,$1000,aobGetScene)
+
+label(code)
+label(return)
+label(pViewport)
+registersymbol(pViewport)
+
+newmem:
+
+code:
+  mov rdx,[rax+138]
+  mov [pViewport],rdx
+  mov rdx,[rax]
+  mulsd xmm8,xmm7
+  jmp return
+pViewport:
+dq 0
+
+aobGetScene:
+  jmp newmem
+  nop 3
+return:
+registersymbol(aobGetScene)
+
+
+
+//////
+
+
+alloc(GetClassName,$1000,$process)
+registersymbol(GetClassName)
+
+GetClassName:
+push rbx
+sub rsp,40
+mov rax,[rcx]
+call qword ptr[rax+30] // object::_get_class_namev
+add rsp,40
+pop rbx
+ret
+
+
+[DISABLE]
+
+aobGetScene:
+  db 48 8B 10 F2 44 0F 59 C7
+dealloc(GetClassName)
+dealloc(newmem)
+
+
+unregistersymbol(*)
+
+
+</AssemblerScript>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>92237</ID>
+          <Description>"切换开发模式"</Description>
+          <Options moHideChildren="1" moDeactivateChildrenAsWell="1"/>
+          <Color>FF8000</Color>
+          <VariableType>Auto Assembler Script</VariableType>
+          <AssemblerScript>{$lua}
+if syntaxcheck then return end
+
+function ReadNameString(ptr)
+ local Name = readPointer(ptr)
+ Name = readPointer(Name+0x10)
+ return readString(Name,99,true)
+end
+
+function MemRec(Name,Ptr,CEType,Owner)
+ local newRec = addList.createMemoryRecord()
+ newRec.setDescription(Name)
+ newRec.setAddress(Ptr)
+ newRec.setType(CEType)
+ newRec.DontSave=true
+ newRec.appendToEntry(Owner)
+end
+
+function GetCEType(gType)
+ if (gType == 1) then return 0 end --bool
+ if (gType == 3) then return 5 end --a float is a double in godot
+ if (gType == 5) then return 4 end --vector2 is a x,y float in godot
+ if (gType == 4) then return 7 end --(unicode)string
+ if (gType == 18) then return 3 end --node pointer
+ return 2 --integer
+end
+
+--GDScript
+function ReadName(member,index)
+  if index == readInteger(member+0x38) then
+    local NameString = readPointer(member+0x30)
+    NameString = readPointer(NameString+0x10)
+    local str = readString(NameString,99,true)
+    return str
+  end
+  local NextMap = readPointer(member+0x20)
+  if NextMap == 0 then return "null" end
+  local retstr = ReadName(NextMap,index)
+  return retstr
+end
+
+--Visual Script
+function ReadNameVariant(member,mi)
+  local NameString = readPointer(member+0x30)
+  NameString = readPointer(NameString+0x10)
+  local szName = readString(NameString,99,true)
+  local Info = {}
+  Info.Name = szName
+  Info.Type = readInteger(member+0x38)
+  Info.Ptr = member+0x40
+  table.insert(mi,Info)
+  local NextMap = readPointer(member+0x20)
+  if NextMap == 0 then return MemberInfo end
+  ReadNameVariant(NextMap,mi)
+end
+
+function Transform(Node,NameRec)
+ local Class = executeCodeEx(0,nil, getAddress("GetClassName"),Node)
+ if Class == 0 or nil then return end
+
+ Class = ReadNameString(Class)
+ if Class == "Sprite" then
+   local SpriteTransform = Node + 0x288
+   MemRec("Transform X",SpriteTransform,4,NameRec)
+   MemRec("Transform Y",SpriteTransform+0x4,4,NameRec)
+   MemRec("Transform Rotation(Radiants)",SpriteTransform+0x8,4,NameRec)
+   MemRec("Transform Scale X",SpriteTransform+0xC,4,NameRec)
+   MemRec("Transform Scale Y",SpriteTransform+0x10,4,NameRec)
+ end
+ if (Class == "Kinematic2D") then
+  ---....
+ end
+end
+
+function FindNode(vp,str)
+ local Childs = readPointer(vp+CONST_CHILDREN)
+ if Childs == 0 then return 0 end
+ local Size = readInteger(Childs-4)
+
+ for i=0,(Size-1) do
+  local Node = readPointer(Childs+i*8)
+  local NameString = readPointer(Node+CONST_NAMESTRING)
+  NameString = readPointer(NameString+0x10)
+  local szName = readString(NameString,99,true)
+  if szName == str then return Node end
+  local ret = FindNode(Node,str)
+  if ret &gt; 0 then return ret end
+ end
+
+ return 0
+end
+
+function FindNodeWithScriptInstance(vp,str)
+ local Childs = readPointer(vp+CONST_CHILDREN)
+ if Childs == 0 then return 0 end
+ local Size = readInteger(Childs-4)
+ if Size == 0 or Size == nil then return 0 end
+
+ for i=0,(Size-1) do
+  local Node = readPointer(Childs+i*8)
+  if Node == 0 then return 0 end
+  local NameString = readPointer(Node+CONST_NAMESTRING)
+  if NameString == 0 or NameString == nil then return 0 end
+  NameString = readPointer(NameString+0x10)
+  local szName = readString(NameString,99,true)
+  if szName == str and readQword(Node+CONST_SCRIPTINSTANCE) &gt; 0 then return Node end
+  local ret = FindNodeWithScriptInstance(Node,str)
+  if ret &gt; 0 and readQword(ret+CONST_SCRIPTINSTANCE) &gt; 0 then return ret end
+ end
+
+ return 0
+end
+
+function FindNodesWithScript(vp,str,array)
+ local Childs = readPointer(vp+CONST_CHILDREN)
+ if Childs == 0 then return 0 end
+ local Size = readInteger(Childs-4)
+
+ for i=0,(Size-1) do
+  local Node = readPointer(Childs+i*8)
+  local NameString = readPointer(Node+CONST_NAMESTRING)
+  if NameString == 0 then return 0 end
+  NameString = readPointer(NameString+0x10)
+  local szName = readString(NameString,99,true)
+  if szName ~= nil and string.match(szName,str) and readQword(Node+CONST_SCRIPTINSTANCE) &gt; 0 then
+   table.insert(array,Node)
+  end
+  FindNodesWithScript(Node,str,array)
+ end
+
+  return array
+end
+
+function FindNodeByScriptType(vp,stype)
+ local Childs = readPointer(vp+CONST_CHILDREN)
+ if Childs == 0 then return 0 end
+ local Size = readInteger(Childs-4)
+
+ for i=0,(Size-1) do
+  local Node = readPointer(Childs+i*8)
+  if Node == 0 then return 0 end
+  local Script = readPointer(Node+0x60)
+  if Script &gt; 0 and Script ~= nil then
+   local ResourcePtr = readPointer(Script+CONST_SCRIPT)
+   if ResourcePtr &gt; 0 and ResourcePtr ~= nil then
+    local name = readString(ResourcePtr,99,true)
+    if string.match(name,stype) then return Node end
+   end
+  end
+  local ret = FindNodeByScriptType(Node,stype)
+  if ret &gt; 0 then return ret end
+ end
+
+ return 0
+
+end
+
+function DebugDumpNodes(vp,bscript)
+ local Childs = readPointer(vp+CONST_CHILDREN)
+ if Childs == 0 then return 0 end
+ local Size = readInteger(Childs-4)
+
+ for i=0,(Size-1) do
+  local Node = readPointer(Childs+i*8)
+  local NameString = readPointer(Node+CONST_NAMESTRING)
+  NameString = readPointer(NameString+0x10)
+  local szName = readString(NameString,99,true)
+  if not bscript then
+   print(string.format("%s : %X",szName,Node))
+  else
+   local Script = readPointer(Node+0x60)
+   local ScriptName = "nil"
+   if Script &gt; 0 and Script ~= nil then
+   local Script = readPointer(Script+CONST_SCRIPT)
+   if Script &gt; 0 and Script ~= nil then ScriptName = readString(Script,99,true) end
+   end
+   if (readQword(Node+CONST_SCRIPTINSTANCE) &gt; 0 ) then print(string.format("%s : %X (%s)",szName,Node,ScriptName)) end
+  end
+  DebugDumpNodes(Node,bscript)
+ end
+
+ return 0
+end
+
+function GenerateClassMember()
+  addList = getAddressList()
+  StringSearch = inputQuery( '', 'Node Name:', '' )
+
+  local vp = getAddress("pViewport")
+  vp = readPointer(vp)
+
+  if vp == 0 then print("no viewport") error("") end
+
+  local Node = FindNodeWithScriptInstance(vp,StringSearch)
+  if Node == 0 then print("node not found") error("") end
+  local ScriptInstance = readPointer(Node+CONST_SCRIPTINSTANCE)
+  local Script = readPointer(ScriptInstance+0x10)
+
+  local ScriptType = executeCodeEx(0,nil,getAddress("GetClassName"),Script)
+  if ScriptType == 0 or nil then return end
+
+  local szScriptType = ReadNameString(ScriptType)
+
+  local NodeName = readPointer(Node+CONST_NAMESTRING)
+  NodeName = readPointer(NodeName+0x10)
+  local szNodeName = readString(NodeName,99,true)
+
+  local ParentRec = addList.createMemoryRecord()
+  ParentRec.setDescription("Generated:")
+  ParentRec.setAddress(0)
+  ParentRec.setType(8)
+  ParentRec.DontSave=true
+
+  local NameRec = addList.createMemoryRecord()
+  NameRec.setDescription(szNodeName)
+  NameRec.setAddress(0)
+  NameRec.setType(8)
+  NameRec.DontSave=true
+  NameRec.appendToEntry(ParentRec)
+
+  if (szScriptType == "GDScript") then
+   local VectorVariant = readPointer(ScriptInstance+0x20)
+   local Size = readInteger(VectorVariant-0x4)
+
+   Transform(Node,NameRec)
+
+   for i=0,(Size-1) do
+    local membermap = readPointer(Script+CONST_MEMBERINDICES)
+    local endmap = readPointer(Script+CONST_MEMBERINDICES+0x8)
+    local VarName = "null"
+
+    membermap = readPointer(membermap+0x10)
+    if (readPointer(membermap+0x10) == endmap) then
+     VarName = ReadName(membermap,i)
+    else
+     while (readPointer(membermap+0x10) ~= endmap) do
+       membermap = readPointer(membermap+0x10)
+     end
+     VarName = ReadName(membermap,i)
+    end
+
+    local Type = readInteger(VectorVariant)
+    local CEType = GetCEType(Type)
+
+    local Ptr = VectorVariant+0x8
+
+    if (Type == 4 ) then -- if string
+     Ptr=readPointer(Ptr) --read ptr to wchars
+    end
+
+    if (Type == 5) then -- if vector2
+     MemRec(string.format("[%x] %s Vec2.x", i,VarName),Ptr,CEType,NameRec)
+     MemRec(string.format("[%x] %s Vec2.y", i,VarName),Ptr+0x4,CEType,NameRec)
+    else
+     MemRec(string.format("[%x] %s", i,VarName),Ptr,CEType,NameRec)
+    end
+
+    VectorVariant=VectorVariant+0x18
+   end
+
+   return
+
+end
+--end of "GDSript"
+
+if (szScriptType == "VisualScript") then
+
+  Transform(Node,NameRec)
+
+  local membermap = readPointer(ScriptInstance+0x18)
+  local endmap = readPointer(ScriptInstance+0x20)
+  local MemberInfos = {}
+
+  membermap = readPointer(membermap+0x10)
+  if (readPointer(membermap+0x10) == endmap) then
+   ReadNameVariant(membermap,MemberInfos)
+  else
+   while (readPointer(membermap+0x10) ~= endmap) do
+     membermap = readPointer(membermap+0x10)
+   end
+   ReadNameVariant(membermap,MemberInfos)
+  end
+
+   for i,v in pairs(MemberInfos) do
+      local CEType = GetCEType(v.Type)
+      MemRec(string.format("[%x] %s", i,v.Name),v.Ptr,CEType,NameRec)
+    end
+
+end
+
+end
+
+[ENABLE]
+CONST_CHILDREN = 0x108
+CONST_NAMESTRING = 0x120
+CONST_SCRIPTINSTANCE = 0x58
+CONST_SCRIPT = 0x250
+CONST_MEMBERINDICES = 0x1C0
+VIEWPORT = 0
+
+local vp = getAddress("pViewport")
+vp = readPointer(vp)
+
+if  vp == 0 then print("error : no viewport - is atleast the main menu loaded?") error("no viewport") return end
+
+VIEWPORT = vp
+
+local GameWorld = FindNodeWithScriptInstance(vp,"GameWorld")
+if GamewWorld == 0 then print("error: GameWorld not found - is atleast the main menu loaded?") error("no gameworld") return end
+
+local ScriptInstance = readPointer(GameWorld+0x58)
+local VectorVariant = readPointer(ScriptInstance+0x20)
+writeBytes(VectorVariant+0x20,1)
+
+[DISABLE]
+
+local GameWorld = FindNodeWithScriptInstance(VIEWPORT,"GameWorld")
+if GamewWorld == 0 then print("error: GameWorld not found - is atleast the main menu loaded?") error("no gameworld") return end
+
+local ScriptInstance = readPointer(GameWorld+0x58)
+local VectorVariant = readPointer(ScriptInstance+0x20)
+writeBytes(VectorVariant+0x20,0)
+
+
+</AssemblerScript>
+          <CheatEntries>
+            <CheatEntry>
+              <ID>92238</ID>
+              <Description>"在游戏中按F1键来打开"</Description>
+              <GroupHeader>1</GroupHeader>
+            </CheatEntry>
+          </CheatEntries>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols>
+    <SymbolEntry>
+      <Name>thread</Name>
+      <Address>2AB853F0000</Address>
+    </SymbolEntry>
+    <SymbolEntry>
+      <Name>testThread</Name>
+      <Address>7FF7F4D70000</Address>
+    </SymbolEntry>
+    <SymbolEntry>
+      <Name>testMember</Name>
+      <Address>7FF6F07B0000</Address>
+    </SymbolEntry>
+    <SymbolEntry>
+      <Name>tth</Name>
+      <Address>7FF668950000</Address>
+    </SymbolEntry>
+    <SymbolEntry>
+      <Name>getnode</Name>
+      <Address>7FF670FF0000</Address>
+    </SymbolEntry>
+    <SymbolEntry>
+      <Name>NoClipThread</Name>
+      <Address>2AB853F03F0</Address>
+    </SymbolEntry>
+  </UserdefinedSymbols>
+  <Comments>mono:
++0x18
+     +0x58 = ScriptInstance
+</Comments>
+</CheatTable>
